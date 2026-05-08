@@ -1,0 +1,83 @@
+import smtplib
+from email.message import EmailMessage
+from html import escape
+from typing import List
+
+from . import config
+from .models import Listing
+
+
+def _format_price(value):
+    return f"${value:,}" if isinstance(value, (int, float)) else "?"
+
+
+def _listing_html_block(listing: Listing) -> str:
+    ppb = listing.price_per_bedroom
+    ppb_str = f"${ppb:,.0f}/bed" if ppb is not None else "?/bed"
+    bath = f"{listing.bathrooms:g}" if listing.bathrooms is not None else "?"
+    location = listing.address or listing.neighborhood or "(location not parsed)"
+    return f"""
+    <div style="margin-bottom:18px;padding:12px;border-left:3px solid #2b7;background:#f8faf9;">
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px;">
+        [{escape(listing.source)}] {escape(listing.title or '(no title)')}
+      </div>
+      <div style="color:#444;margin-bottom:6px;">
+        {_format_price(listing.price)} total &middot;
+        {listing.bedrooms or '?'}BR / {bath}BA &middot;
+        <strong>{ppb_str}</strong>
+      </div>
+      <div style="color:#666;margin-bottom:6px;">{escape(location)}</div>
+      <div><a href="{escape(listing.url)}">{escape(listing.url)}</a></div>
+    </div>
+    """
+
+
+def build_digest(listings: List[Listing]) -> tuple[str, str, str]:
+    count = len(listings)
+    subject = f"[SF Apt] {count} new match{'es' if count != 1 else ''}"
+
+    blocks = "\n".join(_listing_html_block(l) for l in listings)
+    html_body = f"""
+    <html><body style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">
+      <div style="max-width:640px;">
+        <h2 style="margin-bottom:4px;">SF Apartment Monitor</h2>
+        <p style="color:#666;margin-top:0;">{count} new match{'es' if count != 1 else ''} since last check.</p>
+        {blocks}
+        <p style="color:#999;font-size:12px;">Filter: 2-4BR, $1500-$2200/bed, North Beach / Nob Hill / Russian Hill</p>
+      </div>
+    </body></html>
+    """
+
+    text_lines = [f"SF Apartment Monitor — {count} new match(es)\n"]
+    for l in listings:
+        ppb = l.price_per_bedroom
+        ppb_str = f"${ppb:,.0f}/bed" if ppb is not None else "?/bed"
+        text_lines.append(
+            f"[{l.source}] {l.title}\n"
+            f"  {_format_price(l.price)} total · {l.bedrooms or '?'}BR · {ppb_str}\n"
+            f"  {l.address or l.neighborhood or '(location ?)'}\n"
+            f"  {l.url}\n"
+        )
+    text_body = "\n".join(text_lines)
+
+    return subject, text_body, html_body
+
+
+def send_digest(listings: List[Listing]) -> None:
+    if not listings:
+        return
+    if not (config.GMAIL_USER and config.GMAIL_APP_PASSWORD and config.ALERT_TO_EMAIL):
+        raise RuntimeError("Gmail credentials or recipient not configured")
+
+    subject, text_body, html_body = build_digest(listings)
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = config.GMAIL_USER
+    msg["To"] = config.ALERT_TO_EMAIL
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(config.GMAIL_USER, config.GMAIL_APP_PASSWORD)
+        smtp.send_message(msg)

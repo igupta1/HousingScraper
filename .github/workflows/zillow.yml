@@ -1,0 +1,44 @@
+name: zillow-tick
+
+on:
+  schedule:
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: housingscraper-state
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run Zillow scrape (no email — fast tick will notify)
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          RAPIDAPI_ZILLOW_HOST: ${{ secrets.RAPIDAPI_ZILLOW_HOST }}
+        run: python -m src.main zillow
+
+      - name: Commit DB if changed
+        run: |
+          git config user.name "sf-apt-monitor[bot]"
+          git config user.email "sf-apt-monitor@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/listings.db)" ]; then
+            git add data/listings.db
+            git commit -m "state: zillow tick $(date -u +%Y-%m-%dT%H:%MZ)"
+            git pull --rebase --autostash
+            git push
+          fi
