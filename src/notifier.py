@@ -71,10 +71,16 @@ def build_digest(listings: List[Listing]) -> tuple[str, str, str]:
     return subject, text_body, html_body
 
 
+def _recipients() -> List[str]:
+    raw = config.ALERT_TO_EMAIL or ""
+    return [addr.strip() for addr in raw.split(",") if addr.strip()]
+
+
 def send_digest(listings: List[Listing]) -> None:
     if not listings:
         return
-    if not (config.GMAIL_USER and config.GMAIL_APP_PASSWORD and config.ALERT_TO_EMAIL):
+    recipients = _recipients()
+    if not (config.GMAIL_USER and config.GMAIL_APP_PASSWORD and recipients):
         raise RuntimeError("Gmail credentials or recipient not configured")
 
     subject, text_body, html_body = build_digest(listings)
@@ -82,7 +88,7 @@ def send_digest(listings: List[Listing]) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = config.GMAIL_USER
-    msg["To"] = config.ALERT_TO_EMAIL
+    msg["To"] = ", ".join(recipients)
     msg.set_content(text_body)
     msg.add_alternative(html_body, subtype="html")
 
