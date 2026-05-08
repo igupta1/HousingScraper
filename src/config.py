@@ -10,7 +10,10 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 ALERT_TO_EMAIL = os.environ.get("ALERT_TO_EMAIL", "")
 
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
-RAPIDAPI_ZILLOW_HOST = os.environ.get("RAPIDAPI_ZILLOW_HOST", "zillow-com1.p.rapidapi.com")
+RAPIDAPI_ZILLOW_HOST = os.environ.get(
+    "RAPIDAPI_ZILLOW_HOST", "real-estate-zillow-com.p.rapidapi.com"
+)
+ZILLOW_LOCATION = os.environ.get("ZILLOW_LOCATION", "San Francisco, CA")
 
 DB_PATH = REPO_ROOT / "data" / "listings.db"
 

@@ -1,4 +1,5 @@
-from typing import List, Optional
+import re
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -7,16 +8,36 @@ from ..models import Listing
 from .base import Scraper
 
 
-def _to_int(v) -> Optional[int]:
+_PRICE_DIGITS = re.compile(r"[\d,]+")
+
+
+def _parse_price(value) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    m = _PRICE_DIGITS.search(str(value))
+    if not m:
+        return None
+    try:
+        return int(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _parse_int(v) -> Optional[int]:
     if v is None:
         return None
     try:
-        return int(round(float(v)))
+        return int(v)
     except (TypeError, ValueError):
-        return None
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return None
 
 
-def _to_float(v) -> Optional[float]:
+def _parse_float(v) -> Optional[float]:
     if v is None:
         return None
     try:
@@ -27,18 +48,88 @@ def _to_float(v) -> Optional[float]:
 
 def _within_bbox(lat, lon) -> bool:
     if lat is None or lon is None:
-        return True  # don't drop listings whose coords are missing
+        return False
     return (
         config.BBOX["min_lat"] <= lat <= config.BBOX["max_lat"]
         and config.BBOX["min_lon"] <= lon <= config.BBOX["max_lon"]
     )
 
 
-class ZillowScraper(Scraper):
-    """Talks to RapidAPI's `zillow-com1` /propertyExtendedSearch endpoint.
+def _absolute_url(detail_url: str) -> str:
+    if not detail_url:
+        return ""
+    return detail_url if detail_url.startswith("http") else "https://www.zillow.com" + detail_url
 
-    Free tier (Basic plan) is typically ~500 req/mo. We call once per
-    invocation, so polling every 2h gives ~360 req/mo with safety margin.
+
+def _expand(item: dict, neighborhood_label: str) -> List[Listing]:
+    lat_long = item.get("latLong") or {}
+    lat = _parse_float(lat_long.get("latitude"))
+    lon = _parse_float(lat_long.get("longitude"))
+    if not _within_bbox(lat, lon):
+        return []
+
+    zpid = item.get("zpid") or item.get("id")
+    if not zpid:
+        return []
+
+    url = _absolute_url(item.get("detailUrl") or "")
+    address = item.get("address") or item.get("addressStreet")
+    title = item.get("buildingName") or address or f"Zillow {zpid}"
+
+    out: List[Listing] = []
+    units = item.get("units")
+
+    if units and item.get("isBuilding"):
+        for unit in units:
+            beds = _parse_int(unit.get("beds"))
+            price = _parse_price(unit.get("price"))
+            if beds is None:
+                continue
+            out.append(Listing(
+                source="zillow",
+                listing_id=f"{zpid}-{beds}br",
+                url=url,
+                title=title,
+                price=price,
+                bedrooms=beds,
+                bathrooms=None,
+                neighborhood=neighborhood_label,
+                address=address,
+            ))
+    else:
+        beds = _parse_int(item.get("beds") or item.get("bedrooms"))
+        baths = _parse_float(item.get("baths") or item.get("bathrooms"))
+        price = (
+            _parse_price(item.get("unformattedPrice"))
+            or _parse_price(item.get("price"))
+        )
+        out.append(Listing(
+            source="zillow",
+            listing_id=str(zpid),
+            url=url,
+            title=title,
+            price=price,
+            bedrooms=beds,
+            bathrooms=baths,
+            neighborhood=neighborhood_label,
+            address=address,
+        ))
+
+    return out
+
+
+_NEIGHBORHOOD_QUERIES = [
+    ("Nob Hill", "Nob Hill, San Francisco, CA"),
+    ("Russian Hill", "Russian Hill, San Francisco, CA"),
+    ("North Beach", "North Beach, San Francisco, CA"),
+]
+
+
+class ZillowScraper(Scraper):
+    """Real Estate Zillow.Com (RapidAPI) /v1/search/rent.
+
+    Free Basic tier is 100 req/mo (hard limit). We make 3 neighborhood-scoped
+    calls per invocation, so polling once per day = ~90 req/mo with margin.
     """
 
     name = "zillow"
@@ -48,77 +139,56 @@ class ZillowScraper(Scraper):
             self.log.info("RAPIDAPI_KEY not set — skipping Zillow")
             return []
 
-        url = f"https://{config.RAPIDAPI_ZILLOW_HOST}/propertyExtendedSearch"
-        params = {
-            "location": "San Francisco, CA",
-            "status_type": "ForRent",
-            "home_type": "Apartments,Houses,Townhomes,Multi-family,Condos",
-            "bedsMin": str(config.MIN_BEDS),
-            "bedsMax": str(config.MAX_BEDS),
-            "rentMinPrice": str(config.min_total_rent()),
-            "rentMaxPrice": str(config.max_total_rent()),
-        }
+        url = f"https://{config.RAPIDAPI_ZILLOW_HOST}/v1/search/rent"
         headers = {
-            "X-RapidAPI-Key": config.RAPIDAPI_KEY,
-            "X-RapidAPI-Host": config.RAPIDAPI_ZILLOW_HOST,
+            "x-rapidapi-host": config.RAPIDAPI_ZILLOW_HOST,
+            "x-rapidapi-key": config.RAPIDAPI_KEY,
         }
 
-        try:
-            resp = httpx.get(url, params=params, headers=headers, timeout=30.0)
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            body = e.response.text[:200] if e.response is not None else ""
-            self.log.warning("zillow rapidapi http %s: %s",
-                             e.response.status_code if e.response else "?", body)
-            return []
-        except httpx.HTTPError as e:
-            self.log.warning("zillow rapidapi error: %s", e)
-            return []
+        seen_keys: set = set()
+        all_listings: List[Listing] = []
 
-        try:
-            data = resp.json()
-        except ValueError:
-            self.log.warning("zillow rapidapi returned non-JSON")
-            return []
-
-        # zillow-com1 returns {"props": [...], "totalResultCount": N, ...}
-        props = data.get("props") or data.get("results") or []
-        listings: List[Listing] = []
-        for p in props:
-            zpid = p.get("zpid") or p.get("id")
-            if not zpid:
-                continue
-            url_path = p.get("detailUrl") or f"/homedetails/{zpid}_zpid/"
-            full_url = (
-                url_path if url_path.startswith("http")
-                else f"https://www.zillow.com{url_path}"
-            )
-
-            price = _to_int(p.get("price"))
-            beds = _to_int(p.get("bedrooms"))
-            baths = _to_float(p.get("bathrooms"))
-            lat = _to_float(p.get("latitude"))
-            lon = _to_float(p.get("longitude"))
-            address = p.get("address")
-
-            if not _within_bbox(lat, lon):
-                continue
-
-            listings.append(
-                Listing(
-                    source="zillow",
-                    listing_id=str(zpid),
-                    url=full_url,
-                    title=address or f"Zillow listing {zpid}",
-                    price=price,
-                    bedrooms=beds,
-                    bathrooms=baths,
-                    neighborhood=None,
-                    address=address,
-                    raw_text="",
+        for label, query in _NEIGHBORHOOD_QUERIES:
+            try:
+                resp = httpx.get(
+                    url,
+                    params={"location_or_rid": query, "page": "1"},
+                    headers=headers,
+                    timeout=30.0,
                 )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                body = e.response.text[:200] if e.response is not None else ""
+                self.log.warning(
+                    "zillow %s http %s: %s",
+                    label,
+                    e.response.status_code if e.response else "?",
+                    body,
+                )
+                continue
+            except httpx.HTTPError as e:
+                self.log.warning("zillow %s error: %s", label, e)
+                continue
+
+            try:
+                payload = resp.json()
+            except ValueError:
+                self.log.warning("zillow %s returned non-JSON", label)
+                continue
+
+            items = (payload.get("data") or {}).get("listings") or []
+            new_for_label = 0
+            for item in items:
+                for listing in _expand(item, label):
+                    if listing.dedup_key in seen_keys:
+                        continue
+                    seen_keys.add(listing.dedup_key)
+                    all_listings.append(listing)
+                    new_for_label += 1
+            self.log.info(
+                "zillow %s: %d items -> %d unique in-bbox listings",
+                label, len(items), new_for_label,
             )
 
-        self.log.info("zillow: %d listings inside bbox (of %d returned)",
-                      len(listings), len(props))
-        return listings
+        self.log.info("zillow total: %d unique listings", len(all_listings))
+        return all_listings

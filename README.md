@@ -9,9 +9,9 @@ Two GitHub Actions workflows on different schedules, sharing state via a SQLite 
 | Workflow | Schedule | Sources | Sends email? |
 |---|---|---|---|
 | `fast.yml` | every 15 min | Craigslist + Reddit | ✅ digest of all new (incl. Zillow) |
-| `zillow.yml` | every 8 hours | Zillow (RapidAPI) | ❌ inserts only — fast tick emails |
+| `zillow.yml` | once daily (12:00 UTC) | Zillow (RapidAPI) | ❌ inserts only — fast tick emails |
 
-The 8-hour Zillow cadence is sized for the RapidAPI Basic free tier (100 req/mo hard cap on `zillow-com1`): 3 calls/day × 30 days = 90 req/mo, comfortably under the cap.
+The Zillow cron makes **3 neighborhood-scoped API calls per run** (Nob Hill / Russian Hill / North Beach via `real-estate-zillow-com` `/v1/search/rent`). At one run/day that's ~90 req/mo, comfortably under the 100/mo hard cap on the RapidAPI Basic free tier. Neighborhood-scoped queries return ~30× more in-bbox results than a single citywide query.
 
 ## Setup
 
