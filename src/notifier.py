@@ -11,22 +11,31 @@ def _format_price(value):
     return f"${value:,}" if isinstance(value, (int, float)) else "?"
 
 
-def _listing_html_block(listing: Listing) -> str:
+def _header_line(listing: Listing) -> str:
+    hood = (listing.neighborhood or "SF").strip().title()
+    bath = f"{listing.bathrooms:g}" if listing.bathrooms is not None else "?"
     ppb = listing.price_per_bedroom
     ppb_str = f"${ppb:,.0f}/bed" if ppb is not None else "?/bed"
-    bath = f"{listing.bathrooms:g}" if listing.bathrooms is not None else "?"
-    location = listing.address or listing.neighborhood or "(location not parsed)"
+    return (
+        f"[{listing.source}] {hood} - {_format_price(listing.price)} total "
+        f"· {listing.bedrooms or '?'}BR / {bath}BA "
+        f"· {ppb_str}"
+    )
+
+
+def _listing_html_block(listing: Listing) -> str:
+    header = _header_line(listing)
+    title = listing.title or ""
+    address = listing.address or ""
+    # Avoid showing the same string twice if title and address are identical.
+    show_title = title and title != address
     return f"""
     <div style="margin-bottom:18px;padding:12px;border-left:3px solid #2b7;background:#f8faf9;">
-      <div style="font-size:15px;font-weight:600;margin-bottom:4px;">
-        [{escape(listing.source)}] {escape(listing.title or '(no title)')}
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px;">
+        {escape(header)}
       </div>
-      <div style="color:#444;margin-bottom:6px;">
-        {_format_price(listing.price)} total &middot;
-        {listing.bedrooms or '?'}BR / {bath}BA &middot;
-        <strong>{ppb_str}</strong>
-      </div>
-      <div style="color:#666;margin-bottom:6px;">{escape(location)}</div>
+      {f'<div style="color:#444;margin-bottom:4px;">{escape(title)}</div>' if show_title else ''}
+      {f'<div style="color:#666;margin-bottom:6px;">{escape(address)}</div>' if address else ''}
       <div><a href="{escape(listing.url)}">{escape(listing.url)}</a></div>
     </div>
     """
@@ -50,14 +59,13 @@ def build_digest(listings: List[Listing]) -> tuple[str, str, str]:
 
     text_lines = [f"SF Apartment Monitor — {count} new match(es)\n"]
     for l in listings:
-        ppb = l.price_per_bedroom
-        ppb_str = f"${ppb:,.0f}/bed" if ppb is not None else "?/bed"
-        text_lines.append(
-            f"[{l.source}] {l.title}\n"
-            f"  {_format_price(l.price)} total · {l.bedrooms or '?'}BR · {ppb_str}\n"
-            f"  {l.address or l.neighborhood or '(location ?)'}\n"
-            f"  {l.url}\n"
-        )
+        text_lines.append(_header_line(l))
+        if l.title and l.title != (l.address or ""):
+            text_lines.append(f"  {l.title}")
+        if l.address:
+            text_lines.append(f"  {l.address}")
+        text_lines.append(f"  {l.url}")
+        text_lines.append("")
     text_body = "\n".join(text_lines)
 
     return subject, text_body, html_body
