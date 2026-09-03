@@ -41,6 +41,18 @@ def _listing_html_block(listing: Listing) -> str:
     """
 
 
+def _filter_summary() -> str:
+    beds = (
+        f"{config.MIN_BEDS}BR"
+        if config.MIN_BEDS == config.MAX_BEDS
+        else f"{config.MIN_BEDS}-{config.MAX_BEDS}BR"
+    )
+    hoods = " / ".join(h.title() for h in config.NEIGHBORHOODS)
+    return (
+        f"{beds}, ${config.MIN_PRICE_PER_BED:,}-${config.MAX_PRICE_PER_BED:,}/bed, {hoods}"
+    )
+
+
 def build_digest(listings: List[Listing]) -> tuple[str, str, str]:
     count = len(listings)
     subject = f"[SF Apt] {count} new match{'es' if count != 1 else ''}"
@@ -52,7 +64,7 @@ def build_digest(listings: List[Listing]) -> tuple[str, str, str]:
         <h2 style="margin-bottom:4px;">SF Apartment Monitor</h2>
         <p style="color:#666;margin-top:0;">{count} new match{'es' if count != 1 else ''} since last check.</p>
         {blocks}
-        <p style="color:#999;font-size:12px;">Filter: 2-4BR, $1500-$2200/bed, North Beach / Nob Hill / Russian Hill</p>
+        <p style="color:#999;font-size:12px;">Filter: {_filter_summary()}</p>
       </div>
     </body></html>
     """

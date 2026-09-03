@@ -12,7 +12,10 @@ from .base import Scraper
 
 
 _PRICE_RE = re.compile(r"[\d,]+")
-_ID_RE = re.compile(r"/(\d{8,})\.html")
+# Legacy post URLs: /sfc/apa/d/<slug>/7712345678.html
+_LEGACY_ID_RE = re.compile(r"/(\d{8,})\.html")
+# Current post URLs: /view/d/<slug>/<base62-id>
+_VIEW_ID_RE = re.compile(r"/view/d/[^/]+/([A-Za-z0-9]{8,})/?$")
 
 
 def _build_url() -> str:
@@ -43,6 +46,15 @@ def _parse_price(s: str) -> Optional[int]:
         return None
 
 
+def _listing_id(url: str) -> Optional[str]:
+    """Craigslist post id — new /view/d/ URLs or the legacy .html form."""
+    m = _VIEW_ID_RE.search(url.split("?")[0])
+    if m:
+        return m.group(1)
+    m = _LEGACY_ID_RE.search(url)
+    return m.group(1) if m else None
+
+
 def _build_metadata_index(json_ld: dict) -> Dict[str, Dict]:
     """Map listing title -> {beds, baths, lat, lon, address} from JSON-LD."""
     out: Dict[str, Dict] = {}
@@ -71,10 +83,9 @@ def _extract_listing(card, meta_index: Dict[str, Dict]) -> Optional[Listing]:
     url = a["href"]
     if not url.startswith("http"):
         url = "https://sfbay.craigslist.org" + url
-    id_match = _ID_RE.search(url)
-    if not id_match:
+    listing_id = _listing_id(url)
+    if not listing_id:
         return None
-    listing_id = id_match.group(1)
 
     title_el = card.find(class_="title")
     price_el = card.find(class_="price")

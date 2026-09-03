@@ -18,9 +18,9 @@ ZILLOW_LOCATION = os.environ.get("ZILLOW_LOCATION", "San Francisco, CA")
 DB_PATH = REPO_ROOT / "data" / "listings.db"
 
 MIN_BEDS = 2
-MAX_BEDS = 4
+MAX_BEDS = 2
 MIN_PRICE_PER_BED = 1500
-MAX_PRICE_PER_BED = 2200
+MAX_PRICE_PER_BED = 2500
 
 NEIGHBORHOODS = ["north beach", "nob hill", "russian hill"]
 

@@ -1,6 +1,6 @@
 # SF Apartment Monitor
 
-Polls Craigslist, Reddit, and Zillow for new SF rental listings in **North Beach / Nob Hill / Russian Hill**, filters by price-per-bedroom ($1,500–$2,200) and bed count (2/3/4), and emails new matches as a digest.
+Polls Craigslist, Reddit, and Zillow for new SF rental listings in **North Beach / Nob Hill / Russian Hill**, filters to **2-bedroom** units at **$1,500–$2,500 per bedroom** ($3,000–$5,000 total), and emails new matches as a digest.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ In your repo: Settings → Secrets and variables → Actions → New repository 
 |---|---|
 | `GMAIL_USER` | Your sending Gmail address |
 | `GMAIL_APP_PASSWORD` | The 16-char app password from step 1 |
-| `ALERT_TO_EMAIL` | `you@example.com` |
+| `ALERT_TO_EMAIL` | Comma-separated recipients, e.g. `you@example.com,someone-else@example.com` |
 | `RAPIDAPI_KEY` | Your RapidAPI key (skip if not using Zillow) |
 | `RAPIDAPI_ZILLOW_HOST` | `zillow-com1.p.rapidapi.com` |
 
